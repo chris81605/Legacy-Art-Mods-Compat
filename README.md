@@ -4,8 +4,7 @@ DOL 0.5.9新版图片名兼容工具
 Legacy-Art-Mods-Compat.zip为模组，加载后可自动兼容用模组加载器加载的旧版命名美化模组
 
 DOL-IMG-Batch-Renamer.exe用于批量重命名，请放在和img文件夹同一目录下运行（杀毒软件可能会报毒）**使用前请备份img文件夹**
-<img width="311" height="101" alt="image" src="https://github.com/user-attachments/assets/b1230ace-28e4-497f-8e64-4c320a26ca33" />
-
+<img width="313" height="96" alt="image" src="https://github.com/user-attachments/assets/9ce25c2b-1565-47d0-88c9-e5741f96ec7e" />
 
 未覆盖小图标等部分图片
 
