@@ -1,0 +1,54 @@
+{
+	"name": "旧版图片名称适配",
+	"version": "1.0.3",
+	"styleFileList": [],
+	"scriptFileList": [],
+	"scriptFileList_inject_early": [
+		"dolrename.js"
+	],
+	"tweeFileList": [],
+	"imgFileList": [],
+	"additionFile": [],
+	"addonPlugin": [
+    {
+      "modName": "TweeReplacer",
+      "addonName": "TweeReplacerAddon",
+      "modVersion": ">=1.0.0",
+      "params": [
+        {
+          "passage": "Clothing Shop v2 Widgets",
+          "findString": "<<case \"idle_both\">>",
+          "replace": "<<case \"idle_both\" \"idle\">>"
+        }
+      ]
+    },
+    {
+      "modName": "ReplacePatcher",
+      "addonName": "ReplacePatcherAddon",
+      "modVersion": ">=1.0.0",
+      "params": {
+        "js": [
+          {
+            "from": "[\"left_cover\", \"left_idle\", \"idle_both\"]",
+            "to": "[\"left_cover\", \"left_idle\", \"idle_both\", \"idle\"]",
+            "fileName": "canvasmodel-img.js"
+          }
+        ]
+      }
+    }		
+	],
+	"dependenceInfo": [
+		{
+			"modName": "ModLoader",
+			"version": ">=1.0.0"
+		},
+		{
+			"modName": "TweeReplacer",
+			"version": ">=1.0.0"
+		},
+		{
+			"modName": "ReplacePatcher",
+			"version": ">=1.0.0"
+		}
+	]
+}
