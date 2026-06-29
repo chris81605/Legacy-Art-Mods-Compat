@@ -1,5 +1,46 @@
-(function() {
-    const TARGET_MOD = "旧版图片名称适配"; 
+(function () {
+
+    const TARGET_MOD = "旧版图片名称适配";
+
+    // ===============================
+    // Debug
+    // ===============================
+    const DEBUG = true;
+    const DEBUG_FILTER = "";
+
+    const debugHistory = [];
+
+    function compatLog(type, ...args) {
+
+        if (!DEBUG) return;
+
+        const text = args.join(" ");
+
+        if (
+            DEBUG_FILTER &&
+            !text.toLowerCase().includes(DEBUG_FILTER.toLowerCase())
+        ) {
+            return;
+        }
+
+        if (debugHistory.length >= 300) {
+            debugHistory.shift();
+        }
+
+        debugHistory.push({
+            time: performance.now(),
+            type,
+            args: [...args]
+        });
+
+        console.log(`[${TARGET_MOD}][${type}]`, ...args);
+    }
+
+    // ===============================
+    // 固定路徑對應表
+    // key：新版請求路徑
+    // value：舊版實際存在路徑
+    // ===============================
     const SPECIAL_RENAMES = {
         //body
         "body/base-head.png": "body/basehead.png",
@@ -270,17 +311,6 @@
         "body/pregnant-belly/22.png": "body/preggyBelly/pregnancy_belly_22.png",
         "body/pregnant-belly/23.png": "body/preggyBelly/pregnancy_belly_23.png",
         "body/pregnant-belly/24.png": "body/preggyBelly/pregnancy_belly_24.png",
-
-        //face
-        "face/default/blush-1.png": "face/default/blush1.png",
-        "face/default/blush-2.png": "face/default/blush2.png",
-        "face/default/blush-3.png": "face/default/blush3.png",
-        "face/default/blush-4.png": "face/default/blush4.png",
-        "face/default/blush-5.png": "face/default/blush5.png",
-        "face/default/tears-1.png": "face/default/tears1.png",
-        "face/default/tears-2.png": "face/default/tears2.png",
-        "face/default/tears-3.png": "face/default/tears3.png",
-        "face/default/tears-4.png": "face/default/tears4.png",
 
         //ui
         "ui/pepper-spray.png": "ui/pepperspray.png",
@@ -5377,8 +5407,92 @@
 		"clothes/upper/witchgothic/right-idle.png": "clothes/upper/witchgothic/right_gray.png",
 		"clothes/upper/witchgothic/tattered.png": "clothes/upper/witchgothic/tattered_gray.png",
 		"clothes/upper/witchgothic/torn.png": "clothes/upper/witchgothic/torn_gray.png",
+				
     };
-    
+
+    // ===============================
+    // 通配符路徑對應表
+    //
+    // mode:
+    // - fallback：先讀原圖，原圖不存在才讀候選路徑
+    // - override：先讀候選路徑，候選不存在才讀原圖
+    //
+    // paths:
+    // - 可填一個或多個候選路徑
+    // - from 有幾個 *，paths 裡的 * 會依序套用
+    // ===============================
+    const PATTERN_RENAMES = [
+        /*
+        mode:
+        - "override"：舊版美化圖優先，即使新版原圖存在，也先用舊圖
+        - "fallback"：新版原圖不存在時，才使用舊版圖
+        */
+
+        // 範例：美化模組用舊命名，應該優先覆蓋新版原圖
+        // {
+        //    from: "face/*/*/blush-*.png",
+        //    paths: "face/*/*/blush*.png",
+        //    mode: "override"
+        // },
+
+        // 範例：一般相容，缺圖才 fallback
+        // {
+        //    from: "body/breasts-*.png",
+        //    paths: "body/breasts*.png",
+        //    mode: "fallback"
+        // }
+        // 牛轉換的耳朵，覆蓋避免讀原版圖
+        {
+            from: "transformations/cow/ears/spotted-*.png",
+            paths: ["transformations/cow/ears/spotted *.png"],
+            mode: "override"
+        },
+        // 面容多選項fallback,避免面擴找不到檔名(超級亂)
+        {
+            from: "face/*/blush-*.png",
+            paths: ["face/*/blush*.png"],
+            mode: "fallback"
+        },
+        {
+            // 舊版面擴 (1.12.10)
+            from: "face/*/blush*.png",
+            paths: ["face/*/blush-*.png"],
+            mode: "fallback"
+        },               
+        {
+            from: "face/*/tears-*.png",
+            paths: ["face/*/tear-*.png", "face/*/tear*.png",],
+            mode: "fallback"
+        },
+        {
+            //舊版面擴 (1.12.10)
+            from: "face/*/tear*.png",
+            paths: ["face/*/tear-*.png", "face/*/tears-*.png",],
+            mode: "fallback"
+        },                          
+        {
+            from: "face/*/*/blush-*.png",
+            paths: ["face/*/*/blush*.png"],
+            mode: "fallback"
+        },
+        {
+            // 舊版面擴 (1.12.10)
+            from: "face/*/*/blush*.png",
+            paths: ["face/*/*/blush-*.png"],
+            mode: "fallback"
+        },
+        {
+            from: "face/*/*/tears-*.png",
+            paths: ["face/*/*/tear-*.png", "face/*/*/tear*.png",],
+            mode: "fallback"
+        },
+        {
+            // 舊版面擴 (1.12.10)
+            from: "face/*/*/tear*.png",
+            paths: ["face/*/*/tear-*.png", "face/*/*/tears-*.png",],
+            mode: "fallback"
+        },
+    ];
 
     function cleanPath(p) {
         if (!p) return "";
@@ -5387,184 +5501,318 @@
         return t;
     }
 
+    function escapeRegExp(text) {
+        return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+
+    function wildcardToRegex(pattern) {
+        const parts = pattern.split("*").map(escapeRegExp);
+        return new RegExp("^" + parts.join("(.+?)") + "$");
+    }
+
+    function applyWildcardValues(pattern, values) {
+        let index = 0;
+        return pattern.replace(/\*/g, () => values[index++] ?? "");
+    }
+
+    function resolvePatternRule(path, rule) {
+        const regex = wildcardToRegex(rule.from);
+        const match = path.match(regex);
+
+        if (!match) return [];
+
+        const values = match.slice(1);
+
+        const rawPaths = Array.isArray(rule.paths)
+            ? rule.paths
+            : rule.to
+                ? [rule.to]
+                : [];
+
+        return rawPaths.map(p => applyWildcardValues(p, values));
+    }
+
+    function getMatchedPatternRules(path) {
+        const result = [];
+
+        for (const rule of PATTERN_RENAMES) {
+            const paths = resolvePatternRule(path, rule);
+
+            if (paths.length > 0) {
+                result.push({
+                    rule,
+                    paths
+                });
+            }
+        }
+
+        return result;
+    }
 
     function startHook() {
         if (!window.modImgLoaderHooker || !window.modImgLoaderHooker.addSideHooker) {
             setTimeout(startHook, 100);
             return;
         }
+
         const RENAME_MAP = new Map(Object.entries(SPECIAL_RENAMES));
         const successCache = new Map();
-		window._debugCache = successCache;
         const failureSet = new Set();
         const probingSet = new Set();
 
         async function loadAndConvertToBase64(relativePath) {
-			if (successCache.size > 1000) {
-		        successCache.clear(); 
-    		}
-			
+            if (successCache.size > 1000) {
+                successCache.clear();
+            }
+
+            compatLog("TRY", relativePath);
+
             if (!relativePath) return null;
-            const guessPath = relativePath.indexOf('img/') === 0 ? relativePath : 'img/' + relativePath;
+
+            const guessPath = relativePath.indexOf("img/") === 0
+                ? relativePath
+                : "img/" + relativePath;
+
             const cleanedGuess = cleanPath(guessPath);
 
-            if (successCache.has(cleanedGuess)) return successCache.get(cleanedGuess);
-            if (failureSet.has(cleanedGuess)) return null;
+            if (successCache.has(cleanedGuess)) {
+                compatLog("CACHE", cleanedGuess);
+                return successCache.get(cleanedGuess);
+            }
+
+            if (failureSet.has(cleanedGuess)) {
+                compatLog("SKIP MISS CACHE", cleanedGuess);
+                return null;
+            }
 
             probingSet.add(cleanedGuess);
 
             return new Promise((resolve) => {
                 const img = new Image();
-                img.crossOrigin = 'Anonymous';
+                img.crossOrigin = "Anonymous";
+
                 img.onload = () => {
+                    compatLog("FOUND", cleanedGuess);
+
                     probingSet.delete(cleanedGuess);
-                    const canvas = document.createElement('canvas');
+
+                    const canvas = document.createElement("canvas");
                     canvas.width = img.width;
                     canvas.height = img.height;
-                    const ctx = canvas.getContext('2d');
+
+                    const ctx = canvas.getContext("2d");
                     ctx.drawImage(img, 0, 0);
-                    const base64 = canvas.toDataURL('image/png');
+
+                    const base64 = canvas.toDataURL("image/png");
                     successCache.set(cleanedGuess, base64);
+
                     resolve(base64);
                 };
+
                 img.onerror = () => {
+                    compatLog("MISS", cleanedGuess);
+
                     probingSet.delete(cleanedGuess);
                     failureSet.add(cleanedGuess);
+
                     resolve(null);
                 };
+
                 img.src = guessPath;
             });
         }
 
-		const EXCLUDE_FOLDERS = [
-        	'body/', 
-    	    'face/', 
-    	    'misc/', 
-    	    'sex/',
-    	    'transformations/',
-    	    'ui/'
-    	];
-		const EXCEPTION_PATHS = ['misc/icon/clothes/'];
-		function isExcluded(key) {
-    		const k = key.toLowerCase();
-	    	if (EXCEPTION_PATHS.some(path => k.includes(path.toLowerCase()))) {
-    		    return false; 
-    		}
-	    	if (EXCLUDE_FOLDERS.some(folder => k.includes(folder.toLowerCase()))) {
-    		    return true;
-    		}
-    		return false;
-		}
+        const EXCLUDE_FOLDERS = [
+            "body/",
+            "face/",
+            "misc/",
+            "sex/",
+            "transformations/",
+            "ui/"
+        ];
 
-	window.modImgLoaderHooker.addSideHooker({
-            hookName: TARGET_MOD + "_Transcoder",
-            
-            checkImageExist: function(src, modName) { 
-                const key = cleanPath(src);
-                if (probingSet.has(key)) return undefined;
-				if (RENAME_MAP.has(key)) return true;
-				
-				// clothes 圖片全部交給 imageGetter
-                // 目的：
-                // 新版請求 full.png 時，優先嘗試舊版 full_gray.png
-                if (key.startsWith('clothes/')) return true;
-				
-				if (isExcluded(key)) return undefined;
-    	        return undefined;
-            },
+        const EXCEPTION_PATHS = [
+            "misc/icon/clothes/"
+        ];
 
-            imageGetter: async function(src, modName) {
-                const key = cleanPath(src);
-                if (probingSet.has(key)) return undefined;
+        function isExcluded(key) {
+            const k = key.toLowerCase();
 
-				if (!RENAME_MAP.has(key) && isExcluded(key)) {
-            		return undefined; 
-        		}
+            if (EXCEPTION_PATHS.some(path => k.includes(path.toLowerCase()))) {
+                return false;
+            }
 
-                if (RENAME_MAP.has(key)) {
-                    const guessP = RENAME_MAP.get(key);
-                    const base64Data = await loadAndConvertToBase64(guessP);
-                    if (base64Data) return base64Data;
+            if (EXCLUDE_FOLDERS.some(folder => k.includes(folder.toLowerCase()))) {
+                return true;
+            }
+
+            return false;
+        }
+
+        async function tryPatternMatches(key, patternMatches) {
+            for (const item of patternMatches) {
+                const rule = item.rule;
+                const paths = item.paths;
+                const mode = rule.mode || "fallback";
+
+                compatLog("PATTERN", key, "mode =", mode, "paths =", paths);
+
+                if (mode === "override") {
+                    for (const mappedPath of paths) {
+                        const mapped = await loadAndConvertToBase64(mappedPath);
+
+                        if (mapped) {
+                            compatLog("RESULT", key, "=>", mappedPath);
+                            return mapped;
+                        }
+                    }
+
+                    const native = await loadAndConvertToBase64(key);
+
+                    if (native) {
+                        compatLog("RESULT", key, "(pattern native)");
+                        return native;
+                    }
+
+                    continue;
                 }
 
-                if (key.startsWith('clothes/')) {
-                    const parts = key.split('/');
+                const native = await loadAndConvertToBase64(key);
+
+                if (native) {
+                    compatLog("RESULT", key, "(pattern native)");
+                    return native;
+                }
+
+                for (const mappedPath of paths) {
+                    const mapped = await loadAndConvertToBase64(mappedPath);
+
+                    if (mapped) {
+                        compatLog("RESULT", key, "=>", mappedPath);
+                        return mapped;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        window.modImgLoaderHooker.addSideHooker({
+            hookName: TARGET_MOD + "_Transcoder",
+
+            checkImageExist: function (src, modName) {
+                const key = cleanPath(src);
+
+                if (probingSet.has(key)) return undefined;
+
+                if (RENAME_MAP.has(key)) return true;
+
+                if (getMatchedPatternRules(key).length > 0) return true;
+
+                // clothes 圖片全部交給 imageGetter
+                // 目的：
+                // 新版請求 full.png 時，優先嘗試舊版 full_gray.png
+                if (key.startsWith("clothes/")) return true;
+
+                if (isExcluded(key)) return undefined;
+
+                return undefined;
+            },
+
+            imageGetter: async function (src, modName) {
+                const key = cleanPath(src);
+
+                compatLog("REQUEST", key);
+
+                if (probingSet.has(key)) return undefined;
+
+                const patternMatches = getMatchedPatternRules(key);
+
+                if (!RENAME_MAP.has(key) && patternMatches.length === 0 && isExcluded(key)) {
+                    return undefined;
+                }
+
+                // ===============================
+                // SPECIAL_RENAMES
+                // 預設 fallback：
+                // 原圖存在用原圖，不存在才用對應圖
+                // ===============================
+                if (RENAME_MAP.has(key)) {
+                    const native = await loadAndConvertToBase64(key);
+
+                    if (native) {
+                        compatLog("RESULT", key, "(special native)");
+                        return native;
+                    }
+
+                    const guessP = RENAME_MAP.get(key);
+
+                    compatLog("SPECIAL", key, "=>", guessP);
+
+                    const base64Data = await loadAndConvertToBase64(guessP);
+
+                    if (base64Data) {
+                        compatLog("RESULT", key, "=>", guessP);
+                        return base64Data;
+                    }
+                }
+
+                // ===============================
+                // PATTERN_RENAMES
+                // 支援多候選 paths
+                // ===============================
+                if (patternMatches.length > 0) {
+                    const patternResult = await tryPatternMatches(key, patternMatches);
+
+                    if (patternResult) {
+                        return patternResult;
+                    }
+                }
+
+                // ===============================
+                // clothes 通用相容
+                // ===============================
+                if (key.startsWith("clothes/")) {
+                    const parts = key.split("/");
                     const filename = parts.pop();
-                    
-                    const dirPath = parts.join('/') + '/';
-                    const oldDirPath = dirPath.replace(/-/g, '_');
-                    
+
+                    const dirPath = parts.join("/") + "/";
+                    const oldDirPath = dirPath.replace(/-/g, "_");
+
                     const extMatch = filename.match(/\.(png)$/i);
-                    const ext = extMatch ? extMatch[0] : '.png';
-                    const nameNoExt = filename.replace(/\.(png)$/i, '');
+                    const ext = extMatch ? extMatch[0] : ".png";
+                    const nameNoExt = filename.replace(/\.(png)$/i, "");
 
                     const tryFullStack = async (baseName) => {
                         const folders = [dirPath, oldDirPath];
-                        const files = [baseName + '_gray' + ext, baseName + ext];
-                        
+                        const files = [
+                            baseName + "_gray" + ext,
+                            baseName + ext
+                        ];
+
                         for (const d of folders) {
                             for (const f of files) {
+                                compatLog("TRY FILE", d + f);
+
                                 const b64 = await loadAndConvertToBase64(d + f);
-                                if (b64) return b64;
+
+                                if (b64) {
+                                    compatLog("MATCH", d + f);
+                                    return b64;
+                                }
                             }
                         }
+
                         return null;
                     };
-                    /*
-					if (key.includes('clothes/handheld/')) {
-						let candidates = [];
-    					let hName = nameNoExt.toLowerCase(); 
-					    if (hName.includes('-cover')) {
-					        candidates.push(hName.replace(/-/g, '_'));
-    					    candidates.push(hName.replace('-cover', '').replace(/-/g, '_'));
-    					} 
-    					else if (hName.includes('-hold')) {
-    					    candidates.push(hName.replace(/-/g, '_'));
-    					    candidates.push(hName.replace('-hold', '').replace(/-/g, '_'));
-    					}
-    					else {
-    					    candidates.push(hName.replace(/-/g, '_'));
-					    }
-    					for (const targetName of candidates) {
-        					const res = await tryFullStack(targetName);
-        					if (res) return res;
-    					}
-					}
-					*/
-					if (key.includes('clothes/handheld/')) {
 
+                    // ===============================
+                    // handheld 新版 → 舊版命名兼容
+                    // ===============================
+                    if (key.includes("clothes/handheld/")) {
                         let candidates = [];
                         const hName = nameNoExt.toLowerCase();
 
-                        /*
-                        =========================================================
-                        handheld 新版 → 舊版命名兼容
-                        ---------------------------------------------------------
-                        新版：
-                        right-idle.png
-                        right-cover.png
-                        right-hold.png
-                        right-idle-acc.png
-                        right-cover-acc.png
-                        left-idle.png
-                        left-cover.png
-                        left-idle-acc.png
-                        left-cover-acc.png
-
-                        舊版：
-                        right.png
-                        right_cover.png
-                        right_acc.png
-                        right_cover_acc.png
-                        left.png
-                        left_cover.png
-                        left_acc.png
-                        left_cover_acc.png
-                        =========================================================
-                        */
-
-                        // 原名 - 轉 _
-                        // right-cover -> right_cover
                         candidates.push(hName.replace(/-/g, "_"));
 
                         const isAcc = hName.endsWith("-acc");
@@ -5573,137 +5821,177 @@
                         const sideMatch = noAccName.match(/^(right|left)-(.+)$/i);
 
                         if (sideMatch) {
-
                             const side = sideMatch[1].toLowerCase();
                             const action = sideMatch[2].toLowerCase();
 
-                            // right-cover -> right_cover
-                            // left-cover -> left_cover
                             candidates.push(`${side}_${action}`);
 
                             if (isAcc) {
                                 candidates.push(`${side}_${action}_acc`);
                             }
 
-                            // right-idle -> right
-                            // left-idle -> left
                             if (action === "idle") {
-                                candidates.push(side);
-
                                 if (isAcc) {
                                     candidates.push(`${side}_acc`);
                                 }
+
+                                candidates.push(side);
                             }
 
-                            // right-cover -> right_cover
-                            // left-cover -> left_cover
                             if (action === "cover") {
-                                candidates.push(`${side}_cover`);
-
                                 if (isAcc) {
                                     candidates.push(`${side}_cover_acc`);
                                 }
+
+                                candidates.push(`${side}_cover`);
                             }
 
-                            /*
-                            hold 在舊版 handheld 圖層裡沒有獨立 right_hold。
-                            舊版右手普通狀態通常仍然是 right.png。
-                            所以新版 right-hold 先退回 right，再試 hold。
-                            */
                             if (action === "hold") {
-                                candidates.push(side);
-                                candidates.push("hold");
-
                                 if (isAcc) {
                                     candidates.push(`${side}_acc`);
                                     candidates.push("hold_acc");
                                 }
+
+                                candidates.push(side);
+                                candidates.push("hold");
                             }
-       
                         }
 
                         candidates = [...new Set(candidates)];
 
+                        compatLog("HANDHELD", key, candidates);
+
                         for (const targetName of candidates) {
                             const res = await tryFullStack(targetName);
-                            if (res) return res;
+
+                            if (res) {
+                                compatLog("RESULT", key, "=>", targetName);
+                                return res;
+                            }
                         }
                     }
 
                     const armMatch = nameNoExt.match(/^(left|right|hold)-(idle|cover|hold)?(.*)$/i);
+
                     if (armMatch) {
                         const basePose = armMatch[1].toLowerCase();
                         const poseState = armMatch[2] ? armMatch[2].toLowerCase() : "";
                         const rest = armMatch[3] || "";
-                        
-                        let oldPose = (basePose === 'right' && poseState === 'hold') ? 'hold' : 
-                                      (poseState === 'idle') ? basePose :
-                                      (poseState === 'cover') ? basePose + '-cover' : 
-                                      basePose + (poseState ? '-' + poseState : "");
 
-                        let oldSuffix = rest.replace(/-/g, '_');
-                        const res = await tryFullStack(oldPose + oldSuffix);
-                        if (res) return res;
+                        let oldPose = (basePose === "right" && poseState === "hold") ? "hold" :
+                                      (poseState === "idle") ? basePose :
+                                      (poseState === "cover") ? basePose + "-cover" :
+                                      basePose + (poseState ? "-" + poseState : "");
+
+                        let oldSuffix = rest.replace(/-/g, "_");
+                        const oldName = oldPose + oldSuffix;
+
+                        const res = await tryFullStack(oldName);
+
+                        if (res) {
+                            compatLog("RESULT", key, "=>", oldName);
+                            return res;
+                        }
                     }
 
-                    let bodyName = nameNoExt.replace(/-idle/g, '').replace(/-primary/g, '').replace(/-/g, '_');
+                    let bodyName = nameNoExt
+                        .replace(/-idle/g, "")
+                        .replace(/-primary/g, "")
+                        .replace(/-/g, "_");
+
                     const resBody = await tryFullStack(bodyName);
-                    if (resBody) return resBody;
 
-                    if (nameNoExt.includes('-acc')) {
-                        let accName = bodyName.replace('_acc', '') + '_acc';
+                    if (resBody) {
+                        compatLog("RESULT", key, "=>", bodyName);
+                        return resBody;
+                    }
+
+                    if (nameNoExt.includes("-acc")) {
+                        let accName = bodyName.replace("_acc", "") + "_acc";
                         const resAcc = await tryFullStack(accName);
-                        if (resAcc) return resAcc;
-                    }
-                }
-                
-				if (key.startsWith('bodywriting/')) {
-                    const pattern = /(breasts)-(\d+)/g;
-                    if (pattern.test(key)) {
-                        const oldName = key.replace(pattern, '$1$2');
-                        const base64Data = await loadAndConvertToBase64(oldName);
-                        if (base64Data) return base64Data;
+
+                        if (resAcc) {
+                            compatLog("RESULT", key, "=>", accName);
+                            return resAcc;
+                        }
                     }
                 }
 
-                if (key.includes('-')) {
-                    const oldName = key.replace(/-/g, '_');
-                    const base64Data = await loadAndConvertToBase64(oldName);
-                    if (base64Data) return base64Data;
+                // ===============================
+                // bodywriting
+                // breasts-3 → breasts3
+                // ===============================
+                if (key.startsWith("bodywriting/")) {
+                    const pattern = /(breasts)-(\d+)/g;
+
+                    if (pattern.test(key)) {
+                        const oldName = key.replace(pattern, "$1$2");
+                        const base64Data = await loadAndConvertToBase64(oldName);
+
+                        if (base64Data) {
+                            compatLog("RESULT", key, "=>", oldName);
+                            return base64Data;
+                        }
+                    }
                 }
-            
+
+                // ===============================
+                // 通用 - → _
+                // ===============================
+                if (key.includes("-")) {
+                    const oldName = key.replace(/-/g, "_");
+                    const base64Data = await loadAndConvertToBase64(oldName);
+
+                    if (base64Data) {
+                        compatLog("RESULT", key, "=>", oldName);
+                        return base64Data;
+                    }
+                }
+
                 const nativeRes = await loadAndConvertToBase64(key);
-                if (nativeRes) return nativeRes;
+
+                if (nativeRes) {
+                    compatLog("RESULT", key, "(native)");
+                    return nativeRes;
+                }
+
+                compatLog("FAIL", key);
 
                 return undefined;
             },
 
-            imageLoader: async function() { return false; }
+            imageLoader: async function () {
+                return false;
+            }
         });
-        
+
         console.log(`✅ [${TARGET_MOD}] 转码中`);
     }
 
     setTimeout(startHook, 50);
+
 })();
 
-$(document).one(':storyready', function () {
-    if (typeof window.updateClothesItem === 'function') {
+$(document).one(":storyready", function () {
+
+    if (typeof window.updateClothesItem === "function") {
         const _originalUpdateClothesItem = window.updateClothesItem;
-        
+
         window.updateClothesItem = function (slot, item, debug) {
             if (item && item.type && item.type.includes("covered")) {
-                const currentSlot = item.slot || slot; 
+                const currentSlot = item.slot || slot;
                 const idx = item.type.indexOf("covered");
-                
+
                 if (idx !== -1) {
                     let targetType = "";
+
                     switch (currentSlot) {
                         case "under_upper": targetType = "torso_covering"; break;
                         case "under_lower": targetType = "lower_covering"; break;
                         case "lower":       targetType = "overalls"; break;
                         case "face":        targetType = "face_covering"; break;
-                    }                    
+                    }
+
                     if (targetType) {
                         item.type.splice(idx, 1, targetType);
                     } else {
@@ -5711,6 +5999,7 @@ $(document).one(':storyready', function () {
                     }
                 }
             }
+
             return _originalUpdateClothesItem.apply(this, arguments);
         };
     }
@@ -5718,18 +6007,21 @@ $(document).one(':storyready', function () {
     if (setup && setup.clothes) {
         for (const slot in setup.clothes) {
             if (!Array.isArray(setup.clothes[slot])) continue;
+
             setup.clothes[slot].forEach(item => {
                 if (item && item.type && item.type.includes("covered")) {
                     const idx = item.type.indexOf("covered");
+
                     if (idx !== -1) {
                         let targetType = "";
+
                         switch (slot) {
                             case "under_upper": targetType = "torso_covering"; break;
                             case "under_lower": targetType = "lower_covering"; break;
                             case "lower":       targetType = "overalls"; break;
                             case "face":        targetType = "face_covering"; break;
                         }
-                        
+
                         if (targetType) {
                             item.type.splice(idx, 1, targetType);
                         } else {
@@ -5740,4 +6032,5 @@ $(document).one(':storyready', function () {
             });
         }
     }
+
 });
