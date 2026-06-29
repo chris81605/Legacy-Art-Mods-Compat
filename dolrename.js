@@ -5421,6 +5421,18 @@
     // - 可填一個或多個候選路徑
     // - from 有幾個 *，paths 裡的 * 會依序套用
     // ===============================
+        // ===============================
+    // 通配符路徑對應表
+    //
+    // mode:
+    // - fallback：先讀原圖，原圖不存在才讀候選路徑
+    // - override：先讀候選路徑，候選不存在才讀原圖
+    //
+    // paths:
+    // - 可填一個或多個候選路徑
+    // - from 有幾個 * / {n}，paths 裡的 * / {n} 會依序套用
+    // - {n} 只匹配數字，適合 blush / tears 這類圖片
+    // ===============================
     const PATTERN_RENAMES = [
         /*
         mode:
@@ -5430,68 +5442,82 @@
 
         // 範例：美化模組用舊命名，應該優先覆蓋新版原圖
         // {
-        //    from: "face/*/*/blush-*.png",
-        //    paths: "face/*/*/blush*.png",
-        //    mode: "override"
+        //     from: "face/*/*/blush-{n}.png",
+        //     paths: ["face/*/*/blush{n}.png"],
+        //     mode: "override"
         // },
 
         // 範例：一般相容，缺圖才 fallback
         // {
-        //    from: "body/breasts-*.png",
-        //    paths: "body/breasts*.png",
-        //    mode: "fallback"
-        // }
+        //     from: "body/breasts-{n}.png",
+        //     paths: ["body/breasts{n}.png"],
+        //     mode: "fallback"
+        // },
+
         // 牛轉換的耳朵，覆蓋避免讀原版圖
         {
             from: "transformations/cow/ears/spotted-*.png",
             paths: ["transformations/cow/ears/spotted *.png"],
             mode: "override"
         },
-        // 面容多選項fallback,避免面擴找不到檔名(超級亂)
+
+        // 面容多選項 fallback，避免面擴找不到檔名（超級亂）
         {
-            from: "face/*/blush-*.png",
-            paths: ["face/*/blush*.png"],
+            from: "face/*/blush-{n}.png",
+            paths: ["face/*/blush{n}.png"],
             mode: "fallback"
         },
         {
             // 舊版面擴 (1.12.10)
-            from: "face/*/blush*.png",
-            paths: ["face/*/blush-*.png"],
-            mode: "fallback"
-        },               
-        {
-            from: "face/*/tears-*.png",
-            paths: ["face/*/tear-*.png", "face/*/tear*.png",],
+            from: "face/*/blush{n}.png",
+            paths: ["face/*/blush-{n}.png"],
             mode: "fallback"
         },
         {
-            //舊版面擴 (1.12.10)
-            from: "face/*/tear*.png",
-            paths: ["face/*/tear-*.png", "face/*/tears-*.png",],
-            mode: "fallback"
-        },                          
+            from: "face/*/tears-{n}.png",
+            paths: [
+                "face/*/tear-{n}.png",
+                "face/*/tear{n}.png"
+            ],
+            mode: "override"
+        },
         {
-            from: "face/*/*/blush-*.png",
-            paths: ["face/*/*/blush*.png"],
+            // 舊版面擴 (1.12.10)
+            from: "face/*/tear{n}.png",
+            paths: [
+                "face/*/tear-{n}.png",
+                "face/*/tears-{n}.png"
+            ],
+            mode: "override"
+        },
+        {
+            from: "face/*/*/blush-{n}.png",
+            paths: ["face/*/*/blush{n}.png"],
             mode: "fallback"
         },
         {
             // 舊版面擴 (1.12.10)
-            from: "face/*/*/blush*.png",
-            paths: ["face/*/*/blush-*.png"],
+            from: "face/*/*/blush{n}.png",
+            paths: ["face/*/*/blush-{n}.png"],
             mode: "fallback"
         },
         {
-            from: "face/*/*/tears-*.png",
-            paths: ["face/*/*/tear-*.png", "face/*/*/tear*.png",],
-            mode: "fallback"
+            from: "face/*/*/tears-{n}.png",
+            paths: [
+                "face/*/*/tear-{n}.png",
+                "face/*/*/tear{n}.png"
+            ],
+            mode: "override"
         },
         {
             // 舊版面擴 (1.12.10)
-            from: "face/*/*/tear*.png",
-            paths: ["face/*/*/tear-*.png", "face/*/*/tears-*.png",],
-            mode: "fallback"
-        },
+            from: "face/*/*/tear{n}.png",
+            paths: [
+                "face/*/*/tear-{n}.png",
+                "face/*/*/tears-{n}.png"
+            ],
+            mode: "override"
+        }
     ];
 
     function cleanPath(p) {
@@ -5506,15 +5532,38 @@
     }
 
     function wildcardToRegex(pattern) {
-        const parts = pattern.split("*").map(escapeRegExp);
-        return new RegExp("^" + parts.join("(.+?)") + "$");
+        let source = "";
+        let i = 0;
+
+        while (i < pattern.length) {
+
+            if (pattern.startsWith("{n}", i)) {
+                source += "(\\d+)";
+                i += 3;
+                continue;
+            }
+
+            if (pattern[i] === "*") {
+                source += "([^/]+?)";
+                i++;
+                continue;
+            }
+
+            source += escapeRegExp(pattern[i]);
+            i++;
+        }
+
+        return new RegExp("^" + source + "$");
     }
 
     function applyWildcardValues(pattern, values) {
         let index = 0;
-        return pattern.replace(/\*/g, () => values[index++] ?? "");
-    }
 
+        return pattern.replace(/(\{n\}|\*)/g, () => {
+            return values[index++] ?? "";
+        });
+    }
+    
     function resolvePatternRule(path, rule) {
         const regex = wildcardToRegex(rule.from);
         const match = path.match(regex);
@@ -5558,11 +5607,12 @@
         const RENAME_MAP = new Map(Object.entries(SPECIAL_RENAMES));
         const successCache = new Map();
         const failureSet = new Set();
+        
         const probingSet = new Set();
 
         async function loadAndConvertToBase64(relativePath) {
             if (successCache.size > 1000) {
-                successCache.clear();
+                successCache.clear();                
             }
 
             compatLog("TRY", relativePath);
