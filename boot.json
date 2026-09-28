@@ -1,15 +1,15 @@
 {
-	"name": "旧版图片名称适配",
-	"version": "1.0.3-plusV1.1",
-	"styleFileList": [],
-	"scriptFileList": [],
-	"scriptFileList_inject_early": [
-		"dolrename.js"
-	],
-	"tweeFileList": [],
-	"imgFileList": [],
-	"additionFile": [],
-	"addonPlugin": [
+  "name": "旧版图片名称适配",
+  "version": "1.1.0-Plus v3",
+  "styleFileList": [],
+  "scriptFileList": [],
+  "scriptFileList_inject_early": [
+    "dolrename.js"
+  ],
+  "tweeFileList": [],
+  "imgFileList": [],
+  "additionFile": [],
+  "addonPlugin": [
     {
       "modName": "TweeReplacer",
       "addonName": "TweeReplacerAddon",
@@ -35,20 +35,20 @@
           }
         ]
       }
-    }		
-	],
-	"dependenceInfo": [
-		{
-			"modName": "ModLoader",
-			"version": ">=1.0.0"
-		},
-		{
-			"modName": "TweeReplacer",
-			"version": ">=1.0.0"
-		},
-		{
-			"modName": "ReplacePatcher",
-			"version": ">=1.0.0"
-		}
-	]
+    }
+  ],
+  "dependenceInfo": [
+    {
+      "modName": "ModLoader",
+      "version": ">=1.0.0"
+    },
+    {
+      "modName": "TweeReplacer",
+      "version": ">=1.0.0"
+    },
+    {
+      "modName": "ReplacePatcher",
+      "version": ">=1.0.0"
+    }
+  ]
 }
